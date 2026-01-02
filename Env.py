@@ -67,6 +67,7 @@ class UTTTEnv(gym.Env):
         # For next turn, set active player and active boards
         self.current_player *= -1
         new_active_boards = self._get_new_active_board(action_entry)
+        print(f"New active boards: {new_active_boards}")
         self.mini_board_states = np.where(np.isin(self.mini_board_states, [1, -1, 3]), self.mini_board_states, 2) # Set all non-won boards to inactive
         self.mini_board_states[new_active_boards] = 0 # Set new active boards to playable
 
@@ -228,7 +229,21 @@ class UTTTEnv(gym.Env):
             return 3
         
         return 0
-        
+    
+    def _get_new_active_board(self, action_entry):
+        """
+        Given the last action entry, return the new active board number
+        If that board is unplayable, return all playable boards
+        """
+        row = action_entry[0] % 3
+        col = action_entry[1] % 3
+        board_num = (row * 3) + col
+        if self.mini_board_states[board_num] not in [1, -1, 3]:
+            return board_num
+        else:
+            return np.where(np.isin(self.mini_board_states, [0, 2]))[0]
+
+
 
     def _int_to_entry(self, tile_num: int):
         return np.array(divmod(tile_num, 9))
@@ -254,18 +269,5 @@ class UTTTEnv(gym.Env):
     def _action_entry_to_board_num(self, action_entry):
         return ((action_entry[0] // 3) * 3) + (action_entry[1] // 3)
 
-    def _get_new_active_board(self, action_entry):
-        """
-        Given the last action entry, return the new active board number
-        If that board is unplayable, return all playable boards
-        """
-        row = action_entry[0] % 3
-        col = action_entry[1] % 3
-        board_num = (row * 3) + col
-        if self.mini_board_states[board_num] == 0:
-            return board_num
-        else:
-            return np.where(self.mini_board_states == 0)[0]
-
-
+   
         
