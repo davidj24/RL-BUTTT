@@ -50,6 +50,8 @@ class UTTTEnv(gym.Env):
         if action_mask[action] == 0:
             return
         terminated = False
+
+        old_board_states = self.mini_board_states.copy()
         
         # Place new mark
         action_entry = self._int_to_entry(action)
@@ -65,19 +67,34 @@ class UTTTEnv(gym.Env):
             
 
         # For next turn, set active player and active boards
-        self.current_player *= -1
         new_active_boards = self._get_new_active_board(action_entry)
         print(f"New active boards: {new_active_boards}")
         self.mini_board_states = np.where(np.isin(self.mini_board_states, [1, -1, 3]), self.mini_board_states, 2) # Set all non-won boards to inactive
         self.mini_board_states[new_active_boards] = 0 # Set new active boards to playable
 
+        rewards = self.reward_func(old_board_states)
 
-        rewards = self.reward_func()
+        self.current_player *= -1
 
         return self._get_obs(), rewards, terminated, False, self._get_info()
 
-    def reward_func(self):
-        return 0
+    def reward_func(self, old_board_states):
+        # Sparse rewards: only give reward at end of game
+        macro_state = self.mini_board_states.reshape(3, 3)
+        winner = self._check_3x3_state(macro_state)
+        if winner == self.current_player: return 1
+        elif winner == -self.current_player: return -1
+        elif winner == 3: return 0 # Tie
+        
+        # Dense event-based rewards: small reward for winning mini-boards
+        reward = 0
+        if np.any((old_board_states != self.mini_board_states) & (self.mini_board_states == self.current_player)):
+            reward += 0.1 # Won a mini-board
+
+        time_penalty = 0
+        reward += time_penalty
+
+        return reward
 
     def render(self):
         if self.window is None:
