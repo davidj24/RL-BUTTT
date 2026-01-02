@@ -15,7 +15,7 @@ class UTTTEnv(gym.Env):
 
 
         # ======================== Agent variables ========================
-        self.observation_space = gym.spaces.Box(low=0, high=1, shape=(6, 9, 9), dtype=np.int32) # 3 channels, and a 9x9 grid
+        self.observation_space = gym.spaces.Box(low=0, high=1, shape=(7, 9, 9), dtype=np.float32) # 7 channels, and a 9x9 grid
         self.action_space = gym.spaces.Discrete(81)
 
     def reset(self, seed:Optional[int]=None, options: Optional[dict]=None):
@@ -31,7 +31,7 @@ class UTTTEnv(gym.Env):
         super().reset(seed=seed)
         self.grid.fill(0)
         self.mini_board_states.fill(0)
-        self.current_player = np_random.choice([1, -1])
+        self.current_player = self.np_random.choice([1, -1])
 
         observations = self._get_obs()
         info = self._get_info()
@@ -42,6 +42,7 @@ class UTTTEnv(gym.Env):
         action_mask = self._get_action_mask_grid().flatten()
         if action_mask[action] == 0:
             return
+        terminated = False
         
         # Place new mark
         action_entry = self._int_to_entry(action)
@@ -53,7 +54,7 @@ class UTTTEnv(gym.Env):
         self.mini_board_states[board_that_got_played_in] = new_board_state
 
         if new_board_state != 0:
-            terminated = self._check_3x3_state() # Need to check big board but be careful since it can take on vals other than 1, -1
+            terminated = self._check_3x3_state(self.mini_board_states.reshape(3, 3)) != 0
             
 
         # For next turn, set active player and active boards
@@ -68,7 +69,7 @@ class UTTTEnv(gym.Env):
         return self._get_obs(), rewards, terminated, False, self._get_info()
 
     def reward_func(self):
-        pass
+        return 0
 
 
     # ================= Helper Functions =================  
@@ -96,15 +97,15 @@ class UTTTEnv(gym.Env):
 
     def _get_info(self):
         """
-        Give human readabl einfo for debugging
+        Give human readable info for debugging
 
         Returns:
             dict: Info with 
         """
         return {
-            "board_states": self.mini_board_states,
-            "agent_won_boards": sum((self.mini_board_states == 1).astype(np.float32)),
-            "opponent_won_boards": sum((self.mini_board_states == -1).astype(np.float32)),
+            "board_states": self.mini_board_states.copy(),
+            "agent_won_boards": np.sum(self.mini_board_states == 1),
+            "opponent_won_boards": np.sum(self.mini_board_states == -1),
             }
   
     def _get_grid_with_condition(self, condition: int):
@@ -125,34 +126,32 @@ class UTTTEnv(gym.Env):
     def _check_3x3_state(self, board_slice):
         """
         Args:
-            grid_slice: A 3x3 NumPy array (either a mini-board or the mega-board)
+            board_slice: A 3x3 NumPy array (either a mini-board or the mega-board)
         Returns:
             int: 1 if X wins, -1 if O wins, 0 if no winner yet, 3 if tie
         """
-        if 3 in np.sum(board_slice, axis=0) or 3 in np.sum(board_slice, axis=1):
+        # Check rows and cols
+        for p in [1, -1]:
+            if np.any(np.all(board_slice == p, axis=0)) or np.any(np.all(board_slice == p, axis=1)):
+                return p
+        
+        # Check diagonals
+        if np.all(np.diag(board_slice) == 1) or np.all(np.diag(np.fliplr(board_slice)) == 1):
             return 1
-        if -3 in np.sum(board_slice, axis=0) or -3 in np.sum(board_slice, axis=1):
+        if np.all(np.diag(board_slice) == -1) or np.all(np.diag(np.fliplr(board_slice)) == -1):
             return -1
         
-        diag1 = np.trace(board_slice)
-        diag2 = np.trace(np.fliplr(board_slice))
-
-        if diag1 == 3 or diag2 == 3:
-            return 1
-        if diag1 == -3 or diag2 == -3:
-            return -1
-        
-        if 0 not in board_slice:
+        # Check for tie (no 0s for empty, no 2s for inactive-but-playable)
+        if not np.any(board_slice == 0) and not np.any(board_slice == 2):
             return 3
         
         return 0
         
 
-    # Conversions
-    def _int_to_entry(tile_num: int):
-        return np.array([divmod(tile_num, 9)])
+    def _int_to_entry(self, tile_num: int):
+        return np.array(divmod(tile_num, 9))
 
-    def _entry_to_int(x: int, y: int):
+    def _entry_to_int(self, x: int, y: int):
         return (9 * y) + x
 
     def _board_num_to_3x3(self, board_num: int):
@@ -168,7 +167,7 @@ class UTTTEnv(gym.Env):
         row = (board_num // 3) * 3
         col = (board_num % 3) * 3
 
-        return self.grid[row:row+2, col:col+2]
+        return self.grid[row:row+3, col:col+3]
         
     def _action_entry_to_board_num(self, action_entry):
         return ((action_entry[0] // 3) * 3) + (action_entry[1] // 3)
