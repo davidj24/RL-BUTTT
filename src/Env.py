@@ -219,8 +219,8 @@ class UTTTEnv(gym.Env):
             2: unclaimed but currently unplayable
             3: tied
         """
-        mini_board_states_won = (self.mini_board_states == condition).astype(np.float32)
-        boards_matrix = mini_board_states_won.reshape(3, 3) # 3x3
+        mini_board_states_with_cond = (self.mini_board_states == condition).astype(np.float32)
+        boards_matrix = mini_board_states_with_cond.reshape(3, 3) # 3x3
         return np.kron(boards_matrix, np.ones((3, 3))) # 9x9
 
     def _check_3x3_state(self, board_slice):
