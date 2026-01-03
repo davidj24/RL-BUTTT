@@ -48,7 +48,7 @@ class UTTTEnv(gym.Env):
     def step(self, action):
         action_mask = self._get_action_mask_grid().flatten()
         if action_mask[action] == 0:
-            return
+            return self._get_obs(), -0.01, False, False, self._get_info()
         terminated = False
 
         old_board_states = self.mini_board_states.copy()

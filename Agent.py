@@ -42,3 +42,38 @@ class Agent(nn.Module):
         value = self.criticfc2(v)
 
         return logits, value
+    
+    
+    def get_action_and_val(self, obs: torch.Tensor, action_mask: torch.Tensor, action: torch.Tensor=None):
+        """
+        Computes the policy distribution and state value for the given observations, 
+        applying an action mask to ensure only legal moves are considered.
+
+        Args:
+            x (torch.Tensor): The input observation tensor of shape (Batch_Size, 7, 9, 9).
+            action (torch.Tensor, optional): If provided, the method will compute the 
+                log probabilities and entropy for these specific actions. Used during 
+                the PPO update phase.
+
+        Returns:
+            action (torch.Tensor): The sampled actions from the distribution.
+            logprob (torch.Tensor): Log probabilities of the sampled (or provided) actions.
+            entropy (torch.Tensor): The entropy of the masked distribution 
+            value (torch.Tensor): The scalar value estimate from the critic head.
+        """
+        logits, value = self.forward(obs)
+        masked_logits = torch.where(action_mask == 0, torch.tensor(-1e8).to(logits.device), logits)
+
+        action_dist = torch.distributions.Categorical(logits=masked_logits)
+        
+        if action is None:
+            action = action_dist.sample()
+        
+        logprobs = action_dist.log_prob(action)
+        entropy = action_dist.entropy()
+
+
+
+
+        return action, logprobs, entropy, value
+
