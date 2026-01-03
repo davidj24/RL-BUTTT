@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
+from torch.distributions.categorical import Categorical
+
 
 
 class Agent(nn.Module):
@@ -23,13 +25,12 @@ class Agent(nn.Module):
         self.criticfc1 = nn.Linear(in_features=(64*9*9), out_features=512)
         self.criticfc2 = nn.Linear(in_features=(512), out_features=1)
 
-
     def forward(self, x):
         x = F.relu(self.conv1(x))
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = F.relu(self.conv4(x))
+        x = F.relu(self.conv5(x))
 
         flattened_x = torch.flatten(x, start_dim=1)
 
@@ -43,8 +44,7 @@ class Agent(nn.Module):
 
         return logits, value
     
-    
-    def get_action_and_val(self, obs: torch.Tensor, action_mask: torch.Tensor, action: torch.Tensor=None):
+    def get_action_and_val(self, obs: torch.Tensor, action: torch.Tensor=None):
         """
         Computes the policy distribution and state value for the given observations, 
         applying an action mask to ensure only legal moves are considered.
@@ -62,18 +62,16 @@ class Agent(nn.Module):
             value (torch.Tensor): The scalar value estimate from the critic head.
         """
         logits, value = self.forward(obs)
+        action_mask = torch.flatten(obs[:, 3, :, :])
         masked_logits = torch.where(action_mask == 0, torch.tensor(-1e8).to(logits.device), logits)
 
-        action_dist = torch.distributions.Categorical(logits=masked_logits)
+        action_dist = Categorical(logits=masked_logits)
         
         if action is None:
             action = action_dist.sample()
         
         logprobs = action_dist.log_prob(action)
         entropy = action_dist.entropy()
-
-
-
 
         return action, logprobs, entropy, value
 

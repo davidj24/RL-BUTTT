@@ -1,6 +1,6 @@
 import pygame
 import numpy as np
-from Env import UTTTEnv
+from src.Env import UTTTEnv
 
 def main():
     # Initialize environment
