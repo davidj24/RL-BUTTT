@@ -2,10 +2,13 @@ import os
 import random
 import time
 import sys
+import collections
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from src.Agent import Agent
-from src.Env import UTTTEnv
+from src.EnvWrapper import SingleAgentTrainingWrapper
+from src.Opponent import FrozenAgentOpponent
 from dataclasses import dataclass
+from typing import Optional
 
 import gymnasium as gym
 import numpy as np
@@ -16,6 +19,10 @@ import tyro
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
+gym.register(
+    id="UTTT-v0",
+    entry_point="src.Env:UTTTEnv",
+)
 
 @dataclass
 class Args:
@@ -69,7 +76,7 @@ class Args:
     """coefficient of the value function"""
     max_grad_norm: float = 0.5
     """the maximum norm for the gradient clipping"""
-    target_kl: float = None
+    target_kl: Optional[float] = None
     """the target KL divergence threshold"""
 
     # to be filled in runtime
@@ -80,18 +87,16 @@ class Args:
     num_iterations: int = 0
     """the number of iterations (computed in runtime)"""
 
-gym.register(
-    id="UTTT-v0",
-    entry_point="src.Env:UTTTEnv",
-)
-
 def make_env(env_id, idx, capture_video, run_name):
     def thunk():
+        env = gym.make(env_id, render_mode="rgb_array" if capture_video and idx == 0 else None)
+        
+        opponent = FrozenAgentOpponent(name="frozenv0")
+        env = SingleAgentTrainingWrapper(env, opponent)
+
+        # Apply Gym Wrappers
         if capture_video and idx == 0:
-            env = gym.make(env_id, render_mode="rgb_array")
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
-        else:
-            env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         return env
 
@@ -108,7 +113,7 @@ if __name__ == "__main__":
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    run_name = f"{args.exp_name}__{args.seed}"
     if args.track:
         import wandb
 

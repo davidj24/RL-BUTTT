@@ -1,2 +1,18 @@
+# --- Environment and Caches ---
 rl_buttt_venv/
 __pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# --- Training Logs (The bulky stuff) ---
+wandb/
+runs/
+latest-run
+debug.log
+output.log
+*.tfevents.*
+
+# --- Local Artifacts ---
+artifacts/
+*.pth
+*.pt

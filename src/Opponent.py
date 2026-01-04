@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import random
-import Agent
+from src.Agent import Agent
 from abc import ABC, abstractmethod
 
 
@@ -45,7 +45,7 @@ class RandomOpponent(Opponent):
     
 class FrozenAgentOpponent(Opponent):
     def __init__(self, name: str, path_to_model: str=None):
-        self.device = torch.device("cuda" if torch.cuda_is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.display_name = name
         self.agent = Agent()
         self.agent.to(self.device)
@@ -59,10 +59,11 @@ class FrozenAgentOpponent(Opponent):
         return self.display_name
     
     def pick_action(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
-        action = self.agent.get_action(obs)
+        obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device)
+        action = self.agent.get_action(obs_tensor)
         return action
     
     def load(self, path_to_model: str):
         state_dict = torch.load(path_to_model, map_location=self.device)
         self.agent.load_state_dict(state_dict)
-        print(f"Loaded weights for {self._display_name} from {path_to_model}")
+        print(f"Loaded weights for {self.display_name} from {path_to_model}")

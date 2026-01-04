@@ -61,7 +61,7 @@ class Agent(nn.Module):
             value (torch.Tensor): The scalar value estimate from the critic head.
         """
         logits, value = self.forward(obs)
-        action_mask = torch.flatten(obs[:, 3, :, :])
+        action_mask = torch.flatten(obs[:, 3, :, :], start_dim=1)
         masked_logits = torch.where(action_mask == 0, torch.tensor(-1e8).to(logits.device), logits)
 
         action_dist = Categorical(logits=masked_logits)
@@ -82,7 +82,7 @@ class Agent(nn.Module):
         self.eval()
         
         logits, _ = self.forward(obs)
-        action_mask = torch.flatten(obs[:, 3, :, :])
+        action_mask = torch.flatten(obs[:, 3, :, :], start_dim=1)
         masked_logits = torch.where(action_mask == 0, torch.tensor(-1e8).to(logits.device), logits)
 
         action_dist = Categorical(logits=masked_logits)

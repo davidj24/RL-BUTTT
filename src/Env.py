@@ -1,12 +1,13 @@
 import gymnasium as gym
 import numpy as np
-from UTTTGame import UTTTGame
+from src.UTTTGame import UTTTGame
 from typing import Optional
 
 class UTTTEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 30}
 
-    def __init__(self):
+    def __init__(self, render_mode: Optional[str] = None):
+        self.render_mode = render_mode
         self.game = UTTTGame()
         self.observation_space = gym.spaces.Box(low=0, high=1, shape=(7, 9, 9), dtype=np.float32) # 7 channels, and a 9x9 grid
         self.action_space = gym.spaces.Discrete(81)
@@ -60,7 +61,7 @@ class UTTTEnv(gym.Env):
 
     def _get_info(self) -> dict:
         """
-        Give human readable info for debugging
+        Give human readable info for debugging with RL info included if needed
         """
         return self.game._get_info()
   
