@@ -97,7 +97,6 @@ def make_env(env_id, idx, capture_video, run_name):
 
     return thunk
 
-
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
@@ -174,7 +173,7 @@ if __name__ == "__main__":
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
-                action, logprob, _, value = agent.get_action_and_val(next_obs)
+                action, logprob, _, value = agent.get_training_info(next_obs)
                 values[step] = value.flatten()
             actions[step] = action
             logprobs[step] = logprob
@@ -194,7 +193,7 @@ if __name__ == "__main__":
 
         # bootstrap value if not done
         with torch.no_grad():
-            _, _, _, next_value = agent.get_action_and_val(next_obs)
+            next_value = agent.get_value(next_obs)
             next_value = next_value.reshape(1, -1)
             advantages = torch.zeros_like(rewards).to(device)
             lastgaelam = 0
@@ -226,7 +225,7 @@ if __name__ == "__main__":
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
 
-                _, newlogprob, entropy, newvalue = agent.get_action_and_val(b_obs[mb_inds], b_actions.long()[mb_inds])
+                _, newlogprob, entropy, newvalue = agent.get_training_info(b_obs[mb_inds], b_actions.long()[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 

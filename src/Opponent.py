@@ -1,5 +1,9 @@
+import torch
 import numpy as np
+import random
+import Agent
 from abc import ABC, abstractmethod
+
 
 class Opponent(ABC):
     """
@@ -11,8 +15,8 @@ class Opponent(ABC):
         The core method that takes a board state and returns a move.
 
         Args:
-            observation: The 7-channel 9x9 egocentric board state.
-            action_mask: A flattened (81,) array of legal moves.
+            observation: The 7-channel 9x9 egocentric board state (for the opponent's turn)
+            action_mask: A flattened (81,) array of 1's and 0's representing legal and illegal moves respectively
 
         Returns:
             The integer index (0-80) of the chosen move.
@@ -26,4 +30,39 @@ class Opponent(ABC):
         """Returns the name of the opponent type (e.g., 'RandomAgent', 'PPO-V1', 'Human)."""
         pass
 
-        
+class RandomOpponent(Opponent):
+    def __init__(self, seed: int):
+        self.seed = seed
+        self.rng = random.Random(seed)
+
+    @property
+    def name(self) -> str:
+        return f"Random (Seed: {self.seed})"
+
+    def take_action(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
+        legal_actions = np.where(action_mask == 1)[0]
+        return self.rng.choice(legal_actions)
+    
+class FrozenAgentOpponent(Opponent):
+    def __init__(self, name: str, path_to_model: str=None):
+        self.device = torch.device("cuda" if torch.cuda_is_available() else "cpu")
+        self.display_name = name
+        self.agent = Agent()
+        self.agent.to(self.device)
+        self.agent.eval()
+
+        if path_to_model is not None:
+            self.load(path_to_model)
+
+    @property
+    def name(self) -> str:
+        return self.display_name
+    
+    def take_action(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
+        action = self.agent.get_action(obs)
+        return action
+    
+    def load(self, path_to_model: str):
+        state_dict = torch.load(path_to_model, map_location=self.device)
+        self.agent.load_state_dict(state_dict)
+        print(f"Loaded weights for {self._display_name} from {path_to_model}")

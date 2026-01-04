@@ -44,10 +44,9 @@ class Agent(nn.Module):
 
         return logits, value
     
-    def get_action_and_val(self, obs: torch.Tensor, action: torch.Tensor=None):
+    def get_training_info(self, obs: torch.Tensor, action: torch.Tensor=None):
         """
-        Computes the policy distribution and state value for the given observations, 
-        applying an action mask to ensure only legal moves are considered.
+        Computes info for PPO given observations
 
         Args:
             x (torch.Tensor): The input observation tensor of shape (Batch_Size, 7, 9, 9).
@@ -75,3 +74,21 @@ class Agent(nn.Module):
 
         return action, logprobs, entropy, value
 
+    @torch.no_grad()
+    def get_action(self, obs: torch.Tensor, action: torch.Tensor=None):
+        """
+        Inference-only method to get the best move without training overhead.
+        """
+        self.eval()
+        
+        logits, _ = self.forward(obs)
+        action_mask = torch.flatten(obs[:, 3, :, :])
+        masked_logits = torch.where(action_mask == 0, torch.tensor(-1e8).to(logits.device), logits)
+
+        action_dist = Categorical(logits=masked_logits)
+        return action_dist.sample().item()
+    
+    @torch.no_grad()
+    def get_value(self, obs):
+        _, value = self.forward(obs)
+        return value
