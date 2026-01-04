@@ -3,6 +3,7 @@ import random
 import time
 import sys
 import collections
+from collections import deque
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from src.Agent import Agent
 from src.EnvWrapper import SingleAgentTrainingWrapper
@@ -114,6 +115,9 @@ if __name__ == "__main__":
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
     run_name = f"{args.exp_name}__{args.seed}"
+
+    # Track the last 100 episode returns
+    recent_returns = deque(maxlen=100)
     if args.track:
         import wandb
 
@@ -189,12 +193,23 @@ if __name__ == "__main__":
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
 
-            if "final_info" in infos:
-                for info in infos["final_info"]:
-                    if info and "episode" in info:
-                        print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                        writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                        writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+            # Check if the "episode" key exists in the current vectorized infos dictionary
+            if "episode" in infos:
+                for env_idx in range(args.num_envs):
+                    if infos["_episode"][env_idx]:
+                        ret = infos["episode"]["r"][env_idx]
+                        recent_returns.append(ret) # Store the latest result
+                        
+                        # Only log if we have a representative sample
+                        if len(recent_returns) > 0:
+                            ep_rew_mean = sum(recent_returns) / len(recent_returns)
+                            
+                            if args.track:
+                                import wandb
+                                wandb.log({
+                                    "rollout/ep_rew_mean": ep_rew_mean, # This is now smoothed!
+                                    "global_step": global_step,
+                                })
 
         # bootstrap value if not done
         with torch.no_grad():

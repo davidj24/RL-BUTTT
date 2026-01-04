@@ -36,7 +36,10 @@ class SingleAgentTrainingWrapper(gym.Wrapper):
     def step(self, action):
         old_board_states = self.unwrapped.game.mini_board_states.copy()
         if self.unwrapped.game.apply_action(action): # If learning agent's move just won the game
-            return self.unwrapped._get_obs(), 1, True, False, self.unwrapped._get_info()
+            if self.unwrapped.game._check_3x3_state(self.unwrapped.game.mini_board_states.reshape(3, 3)) == self.learning_agent:
+                return self.unwrapped._get_obs(), 1, True, False, self.unwrapped._get_info()
+            else:
+                return self.unwrapped._get_obs(), 0, True, False, self.unwrapped._get_info()
 
         obs = self.unwrapped._get_obs()
         action_mask = obs[3].flatten()
