@@ -46,12 +46,25 @@ class UTTTEnv(gym.Env):
         return observations, info
 
     def step(self, action):
+        terminated = self.apply_action(action)
+        rewards = self.reward_func()
+
+        return self._get_obs(), rewards, terminated, False, self._get_info()
+
+    def apply_action(self, action: int) -> bool:
+        """
+        Purely updates the internal state of the game board and players
+
+        Args:
+            action: an integer representing the index where the mark should be placed
+
+        Returns:
+            bool: whether or not the game is over after the move is applied
+        """
         action_mask = self._get_action_mask_grid().flatten()
         if action_mask[action] == 0:
-            return self._get_obs(), -0.01, False, False, self._get_info()
-        terminated = False
-
-        old_board_states = self.mini_board_states.copy()
+            return False
+        game_over = False
         
         # Place new mark
         action_entry = self._int_to_entry(action)
@@ -63,38 +76,18 @@ class UTTTEnv(gym.Env):
         self.mini_board_states[board_that_got_played_in] = new_board_state
 
         if new_board_state != 0:
-            terminated = self._check_3x3_state(self.mini_board_states.reshape(3, 3)) != 0
-            
+            game_over = self._check_3x3_state(self.mini_board_states.reshape(3, 3)) != 0
 
         # For next turn, set active player and active boards
         new_active_boards = self._get_new_active_board(action_entry)
-        print(f"New active boards: {new_active_boards}")
         self.mini_board_states = np.where(np.isin(self.mini_board_states, [1, -1, 3]), self.mini_board_states, 2) # Set all non-won boards to inactive
         self.mini_board_states[new_active_boards] = 0 # Set new active boards to playable
+        self.current_player *= -1 # Switch who's turn it is
 
-        rewards = self.reward_func(old_board_states)
+        return game_over
 
-        self.current_player *= -1
-
-        return self._get_obs(), rewards, terminated, False, self._get_info()
-
-    def reward_func(self, old_board_states):
-        # Sparse rewards: only give reward at end of game
-        macro_state = self.mini_board_states.reshape(3, 3)
-        winner = self._check_3x3_state(macro_state)
-        if winner == self.current_player: return 1
-        elif winner == -self.current_player: return -1
-        elif winner == 3: return 0 # Tie
-        
-        # Dense event-based rewards: small reward for winning mini-boards
-        reward = 0
-        if np.any((old_board_states != self.mini_board_states) & (self.mini_board_states == self.current_player)):
-            reward += 0.1 # Won a mini-board
-
-        time_penalty = 0
-        reward += time_penalty
-
-        return reward
+    def reward_func(self):
+        return 0
 
     def render(self):
         if self.window is None:
@@ -166,6 +159,7 @@ class UTTTEnv(gym.Env):
             pygame.event.pump()
             pygame.display.update()
             self.clock.tick(self.metadata["render_fps"])
+
 
     # ================= Helper Functions =================  
     def close(self):

@@ -10,7 +10,7 @@ class Opponent(ABC):
     Abstract base class for opponents in single training loop for UTTT
     """
     @abstractmethod
-    def take_action(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
+    def pick_action(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
         """
         The core method that takes a board state and returns a move.
 
@@ -39,7 +39,7 @@ class RandomOpponent(Opponent):
     def name(self) -> str:
         return f"Random (Seed: {self.seed})"
 
-    def take_action(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
+    def pick_action(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
         legal_actions = np.where(action_mask == 1)[0]
         return self.rng.choice(legal_actions)
     
@@ -58,7 +58,7 @@ class FrozenAgentOpponent(Opponent):
     def name(self) -> str:
         return self.display_name
     
-    def take_action(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
+    def pick_action(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
         action = self.agent.get_action(obs)
         return action
     
