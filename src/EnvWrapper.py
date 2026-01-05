@@ -36,7 +36,6 @@ class SingleAgentTrainingWrapper(gym.Wrapper):
         if len(self.opponent_pool_paths) > 1:
             model = self.opponent_pool_paths[-1] if random.random() <= self.newest_model_prob else random.choice(self.opponent_pool_paths)
             self.opponent.load(path_to_model=model)
-            print(f"Opponent is now: {model}")
 
         if self.unwrapped.game.current_player != self.learning_agent: # if game starts with opponent's turn
             action_mask = obs[3].flatten()

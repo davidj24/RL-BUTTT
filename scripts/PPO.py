@@ -325,12 +325,10 @@ if __name__ == "__main__":
                 agent.state_dict(),
                 new_model_path
             )
-            print(f"model: {args.exp_name} at step {global_step}.")
 
             if args.self_play:
                 # Add model to opponent pool
                 shared_opponent_pool_paths.append(new_model_path)
-                print(f"model: {args.exp_name} added to opponent pool. Opponent pool is now: {shared_opponent_pool_paths}")
 
 
 
