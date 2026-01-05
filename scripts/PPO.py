@@ -2,6 +2,7 @@ import os
 import random
 import time
 import sys
+import wandb
 import collections
 from collections import deque
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -29,7 +30,7 @@ gym.register(
 class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """the name of this experiment"""
-    seed: int = 1
+    seed: int = 2
     """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
@@ -43,6 +44,9 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
+    save_model_every: int = 500000
+    """How many steps are taken before model is saved"""
+    model_save_folder: str = "models"
 
     # Algorithm specific arguments
     env_id: str = "UTTT-v0"
@@ -118,6 +122,7 @@ if __name__ == "__main__":
 
     # Track the last 100 episode returns
     recent_returns = deque(maxlen=100)
+    recent_wins = deque(maxlen=100)
     if args.track:
         import wandb
 
@@ -198,16 +203,23 @@ if __name__ == "__main__":
                 for env_idx in range(args.num_envs):
                     if infos["_episode"][env_idx]:
                         ret = infos["episode"]["r"][env_idx]
-                        recent_returns.append(ret) # Store the latest result
-                        
-                        # Only log if we have a representative sample
-                        if len(recent_returns) > 0:
-                            ep_rew_mean = sum(recent_returns) / len(recent_returns)
+
+                        if args.track:
+                            recent_returns.append(ret) # Store the latest result
+                            recent_wins.append(1 if ret >= 0.6 else 0)
+                            ep_rew_mean = 0
+                            win_rate = 0
+
+                            if len(recent_returns) > 0:
+                                ep_rew_mean = sum(recent_returns) / len(recent_returns)
                             
-                            if args.track:
-                                import wandb
+                            if len(recent_wins) > 0:
+                                win_rate = (sum(recent_wins) / len(recent_wins)) * 100
+
+                                
                                 wandb.log({
                                     "rollout/ep_rew_mean": ep_rew_mean, # This is now smoothed!
+                                    "rollout/win_rate": win_rate,
                                     "global_step": global_step,
                                 })
 
@@ -289,6 +301,17 @@ if __name__ == "__main__":
 
             if args.target_kl is not None and approx_kl > args.target_kl:
                 break
+        
+        # Save the model every n global steps
+        if global_step % args.save_model_every < args.batch_size:
+            folder = f"{args.model_save_folder}/{args.exp_name}"
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+            torch.save(
+                agent.state_dict(),
+                os.path.join(folder, f"{args.exp_name}_{global_step}.pth")
+            )
+            print(f"model: {args.exp_name} at step {global_step}")
 
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
