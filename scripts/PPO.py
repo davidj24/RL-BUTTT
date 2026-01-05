@@ -30,7 +30,7 @@ gym.register(
 class Args:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """the name of this experiment"""
-    seed: int = 2
+    seed: int = 1
     """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
@@ -44,9 +44,14 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    save_model_every: int = 500000
+    save_model_every: int = 100000
     """How many steps are taken before model is saved"""
     model_save_folder: str = "models"
+    """The folder to save the models to"""
+    self_play: bool = True
+    """Whether or not an opponent pool should be created and used to swap opponent"""
+    swap_to_newest_model_prob: float = 0.8
+    """The probability that the opponent is swapped to the newest model"""
 
     # Algorithm specific arguments
     env_id: str = "UTTT-v0"
@@ -55,12 +60,13 @@ class Args:
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 8
+    num_envs: int = 12
     """the number of parallel game environments"""
     num_steps: int = 128
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
+    min_lr: float = 5e-5
     gamma: float = 0.99
     """the discount factor gamma"""
     gae_lambda: float = 0.95
@@ -92,12 +98,11 @@ class Args:
     num_iterations: int = 0
     """the number of iterations (computed in runtime)"""
 
-def make_env(env_id, idx, capture_video, run_name):
+def make_env(env_id, idx, capture_video, run_name, opponent_pool_paths):
     def thunk():
         env = gym.make(env_id, render_mode="rgb_array" if capture_video and idx == 0 else None)
-        
-        opponent = FrozenAgentOpponent(name="frozenv0")
-        env = SingleAgentTrainingWrapper(env, opponent)
+
+        env = SingleAgentTrainingWrapper(env, opponent_pool_paths, args.swap_to_newest_model_prob)
 
         # Apply Gym Wrappers
         if capture_video and idx == 0:
@@ -120,9 +125,9 @@ if __name__ == "__main__":
     args.num_iterations = args.total_timesteps // args.batch_size
     run_name = f"{args.exp_name}__{args.seed}"
 
-    # Track the last 100 episode returns
     recent_returns = deque(maxlen=100)
     recent_wins = deque(maxlen=100)
+
     if args.track:
         import wandb
 
@@ -148,14 +153,25 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    agent = Agent().to(device)
+
+    # Save initial agent
+    folder = f"{args.model_save_folder}/{args.exp_name}"
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    initial_agent_path = os.path.join(folder, f"{args.exp_name}_initial.pth")
+    torch.save(
+        agent.state_dict(),
+        initial_agent_path
+    )
 
     # env setup
+    shared_opponent_pool_paths = deque([initial_agent_path] if args.self_play else [], maxlen=10)
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, i, args.capture_video, run_name) for i in range(args.num_envs)],
+        [make_env(args.env_id, i, args.capture_video, run_name, shared_opponent_pool_paths) for i in range(args.num_envs)],
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    agent = Agent().to(device)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -175,7 +191,7 @@ if __name__ == "__main__":
 
     for iteration in range(1, args.num_iterations + 1):
         # Annealing the rate if instructed to do so.
-        if args.anneal_lr:
+        if args.anneal_lr and optimizer.param_groups[0]["lr"] > args.min_lr:
             frac = 1.0 - (iteration - 1.0) / args.num_iterations
             lrnow = frac * args.learning_rate
             optimizer.param_groups[0]["lr"] = lrnow
@@ -302,16 +318,21 @@ if __name__ == "__main__":
             if args.target_kl is not None and approx_kl > args.target_kl:
                 break
         
-        # Save the model every n global steps
+        # Save and update the model every n global steps
         if global_step % args.save_model_every < args.batch_size:
-            folder = f"{args.model_save_folder}/{args.exp_name}"
-            if not os.path.exists(folder):
-                os.makedirs(folder)
+            new_model_path = os.path.join(folder, f"{args.exp_name}_{global_step}.pth")
             torch.save(
                 agent.state_dict(),
-                os.path.join(folder, f"{args.exp_name}_{global_step}.pth")
+                new_model_path
             )
-            print(f"model: {args.exp_name} at step {global_step}")
+            print(f"model: {args.exp_name} at step {global_step}.")
+
+            if args.self_play:
+                # Add model to opponent pool
+                shared_opponent_pool_paths.append(new_model_path)
+                print(f"model: {args.exp_name} added to opponent pool. Opponent pool is now: {shared_opponent_pool_paths}")
+
+
 
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)

@@ -66,4 +66,3 @@ class FrozenAgentOpponent(Opponent):
     def load(self, path_to_model: str):
         state_dict = torch.load(path_to_model, map_location=self.device)
         self.agent.load_state_dict(state_dict)
-        print(f"Loaded weights for {self.display_name} from {path_to_model}")
