@@ -14,5 +14,6 @@ output.log
 
 # --- Local Artifacts ---
 artifacts/
+ratings/
 *.pth
 *.pt

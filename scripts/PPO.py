@@ -5,20 +5,21 @@ import sys
 import wandb
 import collections
 import trueskill
-from collections import deque
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from src.Agent import Agent
-from src.EnvWrapper import SingleAgentTrainingWrapper
-from src.Opponent import FrozenAgentOpponent
-from dataclasses import dataclass
-from typing import Optional
-
+import json
 import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import tyro
+from collections import deque
+from pathlib import Path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from src.Agent import Agent
+from src.EnvWrapper import SingleAgentTrainingWrapper
+from src.Opponent import FrozenAgentOpponent
+from dataclasses import dataclass
+from typing import Optional
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
@@ -61,7 +62,7 @@ class Args:
     """total timesteps of the experiments"""
     learning_rate: float = 2.5e-4
     """the learning rate of the optimizer"""
-    num_envs: int = 12
+    num_envs: int = 8
     """the number of parallel game environments"""
     num_steps: int = 128
     """the number of steps to run in each environment per policy rollout"""
@@ -118,6 +119,19 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
+def save_ratings(agent_ratings, ratings_folder, exp_name):
+    # Convert Rating objects to serializable dictionaries
+    serializable_ratings = {}
+    for key, rating in agent_ratings.items():
+        serializable_ratings[str(key)] = {
+            "mu": rating.mu,
+            "sigma": rating.sigma
+        }
+    
+    save_path = Path(ratings_folder) / f"{exp_name}_ratings.json"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(save_path, "w") as f:
+        json.dump(serializable_ratings, f, indent=4)
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
@@ -152,20 +166,18 @@ if __name__ == "__main__":
     agent = Agent().to(device)
 
     # Save initial agent
-    folder = f"{args.model_save_folder}/{args.exp_name}"
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-    initial_agent_path = os.path.join(folder, f"{args.exp_name}_initial.pth")
+    folder = Path(args.model_save_folder) / args.exp_name
+    folder.mkdir(parents=True, exist_ok=True)
+    initial_agent_path = folder / f"{args.exp_name}_initial.pth"
     torch.save(
         agent.state_dict(),
         initial_agent_path
     )
 
     # Set up data structures for custom wandb charts
-    if not args.self_play:
-        recent_returns = deque(maxlen=100)
-        recent_wins = deque(maxlen=100)
-    else:
+    recent_returns = deque(maxlen=100)
+    recent_wins = deque(maxlen=100)
+    if args.self_play:
         agent_ratings = {initial_agent_path: trueskill.Rating()}
 
     # env setup
@@ -227,26 +239,22 @@ if __name__ == "__main__":
                     if infos["_episode"][env_idx]: # Only get results from envs where episode ended
                         ret = infos["episode"]["r"][env_idx]
 
-                        if not args.self_play: # graph the agent's returns and win_rate
-                            recent_returns.append(ret)
-                            recent_wins.append(1 if ret >= 0.7 else 0)
-                            ep_rew_mean = 0
-                            win_rate = 0
+                        recent_returns.append(ret)
+                        recent_wins.append(1 if ret >= 0.7 else 0)
+                        ep_rew_mean = 0
+                        win_rate = 0
 
-                            if len(recent_returns) > 0:
-                                ep_rew_mean = sum(recent_returns) / len(recent_returns)
-                            
-                            if len(recent_wins) > 0:
-                                win_rate = (sum(recent_wins) / len(recent_wins)) * 100
+                        if len(recent_returns) > 0 and len(recent_wins) > 0:
+                            ep_rew_mean = sum(recent_returns) / len(recent_returns)
+                            win_rate = (sum(recent_wins) / len(recent_wins)) * 100
 
-                                
-                                wandb.log({
-                                    "rollout/ep_rew_mean": ep_rew_mean, # This is now smoothed!
-                                    "rollout/win_rate": win_rate,
-                                    "global_step": global_step,
-                                })
+                            wandb.log({
+                                "rollout/ep_rew_mean": ep_rew_mean, # This is now smoothed!
+                                "rollout/win_rate": win_rate,
+                                "global_step": global_step,
+                            })
 
-                        else: # Track the frontier model's trueskill rating/elo
+                        if args.self_play: # Track the frontier model's trueskill rating/elo
                             frontier_model_id = "training_frontier"
                             opponent_path = infos["opponent_path"][env_idx]
 
@@ -351,7 +359,7 @@ if __name__ == "__main__":
         
         # Save and update the model every n global steps
         if global_step % args.save_model_every < args.batch_size:
-            new_model_path = os.path.join(folder, f"{args.exp_name}_{global_step}.pth")
+            new_model_path = folder / f"{args.exp_name}_{global_step}.pth"
             torch.save(
                 agent.state_dict(),
                 new_model_path
@@ -365,6 +373,7 @@ if __name__ == "__main__":
                     mu=frontier_rating.mu,
                     sigma=frontier_rating.sigma
                 )
+                save_ratings(agent_ratings, "ratings", args.exp_name)
             
 
 

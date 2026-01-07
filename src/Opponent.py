@@ -10,13 +10,12 @@ class Opponent(ABC):
     Abstract base class for opponents in single training loop for UTTT
     """
     @abstractmethod
-    def pick_action(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
+    def pick_action(self, obs: np.ndarray) -> int:
         """
         The core method that takes a board state and returns a move.
 
         Args:
             observation: The 7-channel 9x9 egocentric board state (for the opponent's turn)
-            action_mask: A flattened (81,) array of 1's and 0's representing legal and illegal moves respectively
 
         Returns:
             The integer index (0-80) of the chosen move.
@@ -39,7 +38,8 @@ class RandomOpponent(Opponent):
     def name(self) -> str:
         return f"Random (Seed: {self.seed})"
 
-    def pick_action(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
+    def pick_action(self, obs: np.ndarray) -> int:
+        action_mask = obs[3].flatten()
         legal_actions = np.where(action_mask == 1)[0]
         return self.rng.choice(legal_actions)
     
@@ -58,7 +58,7 @@ class FrozenAgentOpponent(Opponent):
     def name(self) -> str:
         return self.display_name
     
-    def pick_action(self, obs: np.ndarray, action_mask: np.ndarray) -> int:
+    def pick_action(self, obs: np.ndarray) -> int:
         obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0).to(self.device)
         action = self.agent.get_action(obs_tensor)
         return action

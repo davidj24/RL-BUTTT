@@ -44,8 +44,7 @@ class SingleAgentTrainingWrapper(gym.Wrapper):
         info["opponent_path"] = self.opponent_path
 
         if self.unwrapped.game.current_player != self.learning_agent: # if game starts with opponent's turn
-            action_mask = obs[3].flatten()
-            action = self.opponent.pick_action(obs, action_mask)
+            action = self.opponent.pick_action(obs)
             self.unwrapped.game.apply_action(action)
             return self.unwrapped._get_obs(), self.unwrapped._get_info()
         
@@ -63,8 +62,7 @@ class SingleAgentTrainingWrapper(gym.Wrapper):
         
         # Opponent's turn
         obs = self.unwrapped._get_obs()
-        action_mask = obs[3].flatten()
-        action = self.opponent.pick_action(obs, action_mask)
+        action = self.opponent.pick_action(obs)
         terminated = self.unwrapped.game.apply_action(action)
         rewards = self.reward_func(old_board_states, terminated)
         info = self.unwrapped._get_info()
