@@ -4,6 +4,7 @@ import time
 import sys
 import wandb
 import collections
+import trueskill
 from collections import deque
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from src.Agent import Agent
@@ -125,12 +126,7 @@ if __name__ == "__main__":
     args.num_iterations = args.total_timesteps // args.batch_size
     run_name = f"{args.exp_name}__{args.seed}"
 
-    recent_returns = deque(maxlen=100)
-    recent_wins = deque(maxlen=100)
-
     if args.track:
-        import wandb
-
         wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
@@ -165,6 +161,13 @@ if __name__ == "__main__":
         initial_agent_path
     )
 
+    # Set up data structures for custom wandb charts
+    if not args.self_play:
+        recent_returns = deque(maxlen=100)
+        recent_wins = deque(maxlen=100)
+    else:
+        agent_ratings = {initial_agent_path: trueskill.Rating()}
+
     # env setup
     shared_opponent_pool_paths = deque([initial_agent_path] if args.self_play else [], maxlen=10)
     envs = gym.vector.SyncVectorEnv(
@@ -189,6 +192,8 @@ if __name__ == "__main__":
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
 
+
+    # ==================== BEGIN TRAINING ====================
     for iteration in range(1, args.num_iterations + 1):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr and optimizer.param_groups[0]["lr"] > args.min_lr:
@@ -214,15 +219,17 @@ if __name__ == "__main__":
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
 
-            # Check if the "episode" key exists in the current vectorized infos dictionary
-            if "episode" in infos:
+            
+            # ==================== CUSTOM WANDB CHART LOGGING ====================
+            # Check if episode ended and write to wandb charts if so
+            if args.track and "episode" in infos:
                 for env_idx in range(args.num_envs):
-                    if infos["_episode"][env_idx]:
+                    if infos["_episode"][env_idx]: # Only get results from envs where episode ended
                         ret = infos["episode"]["r"][env_idx]
 
-                        if args.track:
-                            recent_returns.append(ret) # Store the latest result
-                            recent_wins.append(1 if ret >= 0.6 else 0)
+                        if not args.self_play: # graph the agent's returns and win_rate
+                            recent_returns.append(ret)
+                            recent_wins.append(1 if ret >= 0.7 else 0)
                             ep_rew_mean = 0
                             win_rate = 0
 
@@ -238,6 +245,30 @@ if __name__ == "__main__":
                                     "rollout/win_rate": win_rate,
                                     "global_step": global_step,
                                 })
+
+                        else: # Track the frontier model's trueskill rating/elo
+                            frontier_model_id = "training_frontier"
+                            opponent_path = infos["opponent_path"][env_idx]
+
+                            if frontier_model_id not in agent_ratings:
+                                agent_ratings[frontier_model_id] = trueskill.Rating()
+                            if opponent_path not in agent_ratings:
+                                agent_ratings[opponent_path] = trueskill.Rating()
+
+                            is_draw = -0.7 < ret < 0.7
+                            winner, loser = (frontier_model_id, opponent_path) if ret >= 0.7 else (opponent_path, frontier_model_id)
+                            agent_ratings[winner], agent_ratings[loser] = trueskill.rate_1vs1(
+                                agent_ratings[winner], agent_ratings[loser], drawn=is_draw
+                            )
+
+                            mu = agent_ratings[frontier_model_id].mu
+                            sigma = agent_ratings[frontier_model_id].sigma
+                            conservative_trueskill = mu - (3*sigma)
+                            wandb.log({
+                                "eval/conservative_trueskill": conservative_trueskill,
+                                "global_step": global_step,
+                            })
+
 
         # bootstrap value if not done
         with torch.no_grad():
@@ -329,6 +360,12 @@ if __name__ == "__main__":
             if args.self_play:
                 # Add model to opponent pool
                 shared_opponent_pool_paths.append(new_model_path)
+                frontier_rating = agent_ratings["training_frontier"]
+                agent_ratings[new_model_path] = trueskill.Rating(
+                    mu=frontier_rating.mu,
+                    sigma=frontier_rating.sigma
+                )
+            
 
 
 

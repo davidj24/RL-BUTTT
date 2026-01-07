@@ -24,7 +24,7 @@ def main():
     human_player = 1
     
     print(f"Game Start! You are {'X' if human_player == 1 else 'O'}.")
-    if env.current_player == human_player:
+    if env.game.current_player == human_player:
         print("Your turn!")
     else:
         print("Agent's turn!")
