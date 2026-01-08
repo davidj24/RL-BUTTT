@@ -141,7 +141,7 @@ if __name__ == "__main__":
     run_name = f"{args.exp_name}__{args.seed}"
 
     if args.track:
-        wandb.init(
+        wandb_run = wandb.init(
             project=args.wandb_project_name,
             entity=args.wandb_entity,
             sync_tensorboard=True,
@@ -150,6 +150,11 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
+        # wandb_run.define_metric("global_step")
+        wandb_run.define_metric("eval/*", step_metric="global_step")
+        wandb_run.define_metric("rollout/*", step_metric="global_step")
+        wandb_run.define_metric("losses/*", step_metric="global_step")
+        wandb_run.define_metric("charts/*", step_metric="global_step")
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
         "hyperparameters",
