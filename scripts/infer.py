@@ -13,70 +13,90 @@ from src.Opponent import FrozenAgentOpponent
 @dataclass
 class Args:
     model_path: Path
-    """The model being inferred"""
+    """The model being inferred (plays as O)."""
     human_player: bool = True
-    """Determines whether the game is between two models or a model and human. 0 for human, 1 for model"""
-    opponent_model_path: str = ""
-    """If two model's are playing against each other, this is the path to the second model"""
+    """Set to true to play as the Human (X) against the model (O)."""
+    opponent_model_path: Optional[Path] = None
+    """If not playing as a human, this is the path to the second model (plays as X)."""
     num_games: int = 3
-    """The number of games to be played"""
+    """The number of games to be played."""
     viewer: bool = True
-    """Whether pygame window should be displayed, needed for human player"""
-
-
+    """If set, the pygame window will not be displayed. Human player requires the viewer."""
+    slow_moves: bool = True
+    """Determines if there's a pause before models make move so human can see it"""
 
 def main():
     args = tyro.cli(Args)
 
+    if args.human_player and not args.viewer:
+        print("Error: A human player requires the viewer. Cannot use --human_player and set --viewer to false.")
+        sys.exit(1)
+
+    if not args.human_player and not args.opponent_model_path:
+        print("Error: For Model vs. Model mode, --opponent_model_path must be provided.")
+        sys.exit(1)
+        
+    use_viewer = args.viewer
+
     # Initialize environment
-    env = UTTTEnv(render_mode="human" if args.viewer else None)
+    env = UTTTEnv(render_mode="human" if use_viewer else None)
 
     # Setup Players
-    model_p2 = FrozenAgentOpponent(name="Inferring_model", path_to_model=str(args.model_path))
-    model_p1 = None
+    model_o = FrozenAgentOpponent(name="Model_O", path_to_model=str(args.model_path))
+    model_x = None
     if not args.human_player:
-        if not args.opponent_model_path:
-            print("Error: For Model vs. Model mode, --opponent_model_path must be provided.")
-            sys.exit(1)
-        model_p1 = FrozenAgentOpponent(name="Opponent_model", path_to_model=args.opponent_model_path)
+        model_x = FrozenAgentOpponent(name="Model_X", path_to_model=str(args.opponent_model_path))
     
     player_names = {
-        1: "Human" if args.human_player else model_p1.name,
-        -1: model_p2.name
+        1: "Human" if args.human_player else model_x.name,
+        -1: model_o.name
     }
 
     scores = {player_names[1]: 0, player_names[-1]: 0, "Ties": 0}
 
+    main_running = True
     for game_num in range(1, args.num_games + 1):
+        if not main_running:
+            break
+
         obs, info = env.reset()
-        if args.viewer:
+        if use_viewer:
             env.render()
             pygame.display.set_caption(f"Ultimate Tic Tac Toe - Game {game_num}/{args.num_games}")
 
         game_over = False
-        running = True
         
         print("\n" + "="*20)
-        print(f"Starting Game {game_num}")
+        print(f"Starting Game {game_num}/{args.num_games}")
         print(f"Player 1 (X): {player_names[1]}")
         print(f"Player 2 (O): {player_names[-1]}")
         print("="*20)
 
-        while not game_over and running:
+        while not game_over and main_running:
+            # Check for quit event first
+            if use_viewer:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        main_running = False
+                        break
+            if not main_running:
+                break
+
             current_player_id = env.game.current_player
             player_name = get_player_name(env, player_names)
             
             is_human_turn = args.human_player and current_player_id == 1
 
+            action = -1
+
             if is_human_turn:
                 print(f"\nYour turn ({player_name})")
                 # Handle Human Input
                 action_taken = False
-                while not action_taken:
+                while not action_taken and main_running:
                     for event in pygame.event.get():
                         if event.type == pygame.QUIT:
-                            running = False
-                            action_taken = True
+                            main_running = False
                             break
                         if event.type == pygame.MOUSEBUTTONDOWN:
                             x, y = event.pos
@@ -86,74 +106,70 @@ def main():
                             
                             legal_moves = env.game._get_legal_moves().flatten()
                             if legal_moves[action] == 1:
-                                print(f"{player_name} plays at: {action} (Row {row}, Col {col})")
-                                game_over = env.game.apply_action(action)
-                                env.render()
                                 action_taken = True
                             else:
-                                print("Invalid move!")
-                    if not running:
+                                print("Invalid move! Please try again.")
+                                action = -1
+                    if not main_running:
                         break
             else:
                 # Handle Model Input
                 print(f"\n{player_name}'s turn...")
-                if args.viewer:
+                if use_viewer and args.slow_moves:
                     pygame.time.wait(500)
                     pygame.event.pump()
 
                 obs = env._get_obs()
-                model_to_use = model_p1 if current_player_id == 1 else model_p2
+                model_to_use = model_x if current_player_id == 1 else model_o
                 action = model_to_use.pick_action(obs)
-                
+
+            if not main_running:
+                break
+
+            if action != -1:
                 row, col = env.game._int_to_entry(action)
                 print(f"{player_name} plays at: {action} (Row {row}, Col {col})")
-
                 game_over = env.game.apply_action(action)
-                if args.viewer:
+                if use_viewer:
                     env.render()
 
             if game_over:
-                winner = check_winner(env, player_names)
-                if winner == player_names[1]:
+                winner_name = check_winner(env, player_names)
+                if winner_name == player_names[1]:
                     scores[player_names[1]] += 1
-                elif winner == player_names[-1]:
+                elif winner_name == player_names[-1]:
                     scores[player_names[-1]] += 1
                 else:
                     scores["Ties"] += 1
                 
                 print("\n" + "-"*20)
                 print(f"Game {game_num} Over!")
-                print(f"Winner: {winner}")
+                print(f"Winner: {winner_name}")
                 print("Current Scores:")
-                print(f"  {player_names[1]}: {scores[player_names[1]]}")
-                print(f"  {player_names[-1]}: {scores[player_names[-1]]}")
+                print(f"  {player_names[1]} (X): {scores[player_names[1]]}")
+                print(f"  {player_names[-1]} (O): {scores[player_names[-1]]}")
                 print(f"  Ties: {scores['Ties']}")
                 print("-"*20)
 
-            # Check for quit event after every move
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-            
-            if env.game.clock:
+            if use_viewer and env.game.clock:
                 env.game.clock.tick(30)
         
-        if not running:
-            break
-
         # Wait for 'n' key press for next game
-        if game_num < args.num_games:
+        if use_viewer and main_running and game_num < args.num_games:
             print("\nPress 'N' to play the next game, or close the window to quit.")
             waiting_for_next = True
-            while waiting_for_next:
+            while waiting_for_next and main_running:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
-                        waiting_for_next = False
-                        running = False
+                        main_running = False
+                        break
                     if event.type == pygame.KEYDOWN and event.key == pygame.K_n:
                         waiting_for_next = False
-                if not running:
+                if not main_running:
                     break
+    
+    print("\nAll games finished!")
+    env.close()
     
     print("\nAll games finished!")
     env.close()
@@ -162,8 +178,6 @@ def get_player_name(env, player_names):
     return player_names.get(env.game.current_player, "Unknown")
 
 def check_winner(env, player_names):
-    # This check is based on the internal state of UTTTGame, which might be what is intended
-    # It seems to check the macro board state for a winner
     macro_state = env.game.mini_board_states.reshape(3, 3)
     winner_id = env.game._check_3x3_state(macro_state)
     

@@ -46,7 +46,7 @@ class Args:
     """the entity (team) of wandb's project"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
-    save_model_every: int = 100000
+    save_model_every: int = 200000
     """How many steps are taken before model is saved"""
     model_save_folder: str = "models"
     """The folder to save the models to"""
@@ -58,9 +58,9 @@ class Args:
     # Algorithm specific arguments
     env_id: str = "UTTT-v0"
     """the id of the environment"""
-    total_timesteps: int = 500000
+    total_timesteps: int = 10000000
     """total timesteps of the experiments"""
-    learning_rate: float = 2.5e-4
+    learning_rate: float = 3e-4
     """the learning rate of the optimizer"""
     num_envs: int = 8
     """the number of parallel game environments"""
@@ -396,3 +396,10 @@ if __name__ == "__main__":
 
     envs.close()
     writer.close()
+
+    new_model_path = folder / f"{args.exp_name}_{global_step}.pth"
+    torch.save(
+        agent.state_dict(),
+        new_model_path
+    )
+    save_ratings(agent_ratings, "ratings", args.exp_name)
