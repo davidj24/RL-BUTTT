@@ -69,6 +69,7 @@ class Args:
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
     min_lr: float = 5e-5
+    """The minimum learning rate allowed after annealing"""
     gamma: float = 0.99
     """the discount factor gamma"""
     gae_lambda: float = 0.95
