@@ -1,0 +1,4 @@
+trueskill==0.4.5
+wandb==0.23.1
+tyro==1.0.3
+gymnasium[all]==1.2.3
