@@ -52,8 +52,8 @@ class UTTTEnv(gym.Env):
         chan1 = (self.game.grid == -self.game.current_player).astype(np.float32)
         chan2 = self.game._get_grid_with_condition(0) # Active Board(s)
         chan3 = self.game._get_legal_moves() # Currently playable tiles
-        chan4 = self.game._get_grid_with_condition(1) # Boards won by agent
-        chan5 = self.game._get_grid_with_condition(-1) # Boards won by opponent
+        chan4 = self.game._get_grid_with_condition(self.game.current_player) # Boards won by player to move
+        chan5 = self.game._get_grid_with_condition(-self.game.current_player) # Boards won by opponent
         chan6 = self.game._get_grid_with_condition(3) # Boards tied
 
         obs = np.stack([chan0, chan1, chan2, chan3, chan4, chan5, chan6], axis=0)

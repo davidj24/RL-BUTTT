@@ -1,66 +1,88 @@
-import numpy as np
-import pygame
 from typing import Optional
 
-class UTTTGame():
-    def __init__(self):
-        # ======================== Game Variables ========================
-        self.grid = np.zeros((9, 9)) # 0 for empty, 1 for player 1 (X's), -1 for player 2 (O's)
-        self.current_player = 1 # 1 for player 1 (X's), -1 for player 2 (O's)
+import numpy as np
+import pygame
 
-        # 0: playable, 1: won by player1, -1: won by player2, 2 inactive, 3: tie
-        self.mini_board_states = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0]) # Each index represents a board, i.e. idx 2 = top right board
+
+EMPTY = 0
+PLAYER_X = 1
+PLAYER_O = -1
+INACTIVE = 2
+DRAW = 3
+
+
+class IllegalMoveError(ValueError):
+    """Raised when an action is not legal in the current game state."""
+
+
+class UTTTGame:
+    """Pure Ultimate Tic-Tac-Toe rules plus a small pygame viewer.
+
+    Public state kept for compatibility:
+    - grid: 9x9 array with 0 for empty, 1 for X, -1 for O.
+    - current_player: player to move, either 1 or -1.
+    - mini_board_states: compatibility view where 0 means active, 2 means
+      inactive/unclaimed, 1/-1 mean won, and 3 means drawn.
+    """
+
+    def __init__(self):
+        self.grid = np.zeros((9, 9), dtype=np.int8)
+        self.board_results = np.zeros(9, dtype=np.int8)
+        self.active_boards = np.ones(9, dtype=bool)
+        self.current_player = PLAYER_X
+        self.winner = EMPTY
+        self.is_terminal = False
 
         self.rng = np.random.default_rng()
 
-        # Rendering variables
-        self.window_size = 540  # 60 pixels per small cell
+        self.window_size = 540
         self.window = None
         self.clock = None
         self.render_fps = 30
 
+    @property
+    def mini_board_states(self) -> np.ndarray:
+        """Compatibility view used by the older env/wrapper code."""
+        states = np.full(9, INACTIVE, dtype=np.int8)
+        states[self.active_boards] = EMPTY
+        finished = self.board_results != EMPTY
+        states[finished] = self.board_results[finished]
+        return states
+
     def reset(self, seed: Optional[int] = None):
-        """Resets the board."""
         if seed is not None:
             self.rng = np.random.default_rng(seed)
-        self.grid.fill(0)
-        self.mini_board_states.fill(0)
-        self.current_player = self.rng.choice([1, -1])
+
+        self.grid.fill(EMPTY)
+        self.board_results.fill(EMPTY)
+        self.active_boards.fill(True)
+        self.current_player = int(self.rng.choice([PLAYER_X, PLAYER_O]))
+        self.winner = EMPTY
+        self.is_terminal = False
 
     def apply_action(self, action: int) -> bool:
-        """
-        Purely updates the internal state of the game board and players
+        """Apply one legal action and return whether the game is over."""
+        if self.is_terminal:
+            raise IllegalMoveError("Cannot play after the game has ended.")
 
-        Args:
-            action: an integer [0, 80] representing the index where the mark should be placed
+        row, col = self._int_to_entry(action)
+        if not self._is_legal_entry(row, col):
+            raise IllegalMoveError(f"Action {action} is illegal for the current state.")
 
-        Returns:
-            bool: whether or not the game is over after the move is applied
-        """
-        legal_moves = self._get_legal_moves().flatten()
-        if legal_moves[action] == 0:
-            return False
-        game_over = False
-        
-        # Place new mark
-        action_entry = self._int_to_entry(action)
-        self.grid[action_entry[0]][action_entry[1]] = self.current_player
+        self.grid[row, col] = self.current_player
+        played_board = self._action_entry_to_board_num((row, col))
+        self.board_results[played_board] = self._check_3x3_state(
+            self._board_num_to_3x3(played_board)
+        )
 
-        # Check if the mini board was newly won
-        board_that_got_played_in = self._action_entry_to_board_num(action_entry)
-        new_board_state = self._check_3x3_state(self._board_num_to_3x3(board_that_got_played_in))
-        self.mini_board_states[board_that_got_played_in] = new_board_state
+        self.winner = self._check_3x3_state(self.board_results.reshape(3, 3))
+        self.is_terminal = self.winner != EMPTY
 
-        if new_board_state != 0:
-            game_over = self._check_3x3_state(self.mini_board_states.reshape(3, 3)) != 0
+        if not self.is_terminal:
+            self.active_boards = self._next_active_boards(row, col)
+            self.current_player *= -1
 
-        # For next turn, set active player and active boards
-        new_active_boards = self._get_new_active_board(action_entry)
-        self.mini_board_states = np.where(np.isin(self.mini_board_states, [1, -1, 3]), self.mini_board_states, 2) # Set all non-won boards to inactive
-        self.mini_board_states[new_active_boards] = 0 # Set new active boards to playable
-        self.current_player *= -1 # Switch who's turn it is
-
-        return game_over
+        return self.is_terminal
 
     def render(self):
         if self.window is None:
@@ -70,173 +92,146 @@ class UTTTGame():
             self.clock = pygame.time.Clock()
 
         canvas = pygame.Surface((self.window_size, self.window_size))
-        canvas.fill((255, 255, 255)) # White background
-
+        canvas.fill((255, 255, 255))
         pix_square_size = self.window_size / 9
 
-        # 1. Highlight Active Boards (Light Yellow)
-        for i in range(9):
-            if self.mini_board_states[i] == 0: # 0 means active/playable
-                row = (i // 3) * 3
-                col = (i % 3) * 3
-                rect = pygame.Rect(col * pix_square_size, row * pix_square_size, pix_square_size * 3, pix_square_size * 3)
-                pygame.draw.rect(canvas, (255, 255, 200), rect)
+        for board_num in np.flatnonzero(self.active_boards):
+            row = (board_num // 3) * 3
+            col = (board_num % 3) * 3
+            rect = pygame.Rect(
+                col * pix_square_size,
+                row * pix_square_size,
+                pix_square_size * 3,
+                pix_square_size * 3,
+            )
+            pygame.draw.rect(canvas, (255, 255, 200), rect)
 
-        # 2. Draw Grid Lines
         for i in range(1, 9):
-            # Thin grey lines for small cells
-            thickness = 1
-            color = (200, 200, 200)
-            
-            # Thick black lines for macro board
-            if i % 3 == 0:
-                thickness = 4
-                color = (0, 0, 0)
-            
-            # Horizontal
+            thickness = 4 if i % 3 == 0 else 1
+            color = (0, 0, 0) if i % 3 == 0 else (200, 200, 200)
             pygame.draw.line(canvas, color, (0, i * pix_square_size), (self.window_size, i * pix_square_size), thickness)
-            # Vertical
             pygame.draw.line(canvas, color, (i * pix_square_size, 0), (i * pix_square_size, self.window_size), thickness)
 
-        # 3. Draw X's and O's (Small)
-        for r in range(9):
-            for c in range(9):
-                if self.grid[r, c] == 1:
-                    color = (255, 0, 0) # Red X
-                    start_pos = (c * pix_square_size + 10, r * pix_square_size + 10)
-                    end_pos = ((c + 1) * pix_square_size - 10, (r + 1) * pix_square_size - 10)
-                    pygame.draw.line(canvas, color, start_pos, end_pos, 3)
-                    pygame.draw.line(canvas, color, (start_pos[0], end_pos[1]), (end_pos[0], start_pos[1]), 3)
-                elif self.grid[r, c] == -1:
-                    color = (0, 0, 255) # Blue O
-                    center = (int((c + 0.5) * pix_square_size), int((r + 0.5) * pix_square_size))
-                    pygame.draw.circle(canvas, color, center, int(pix_square_size / 2 - 8), 3)
+        for row in range(9):
+            for col in range(9):
+                self._draw_cell_mark(canvas, row, col, pix_square_size)
 
-        # 4. Draw Big X's and O's for won mini-boards
-        for i in range(9):
-            state = self.mini_board_states[i]
-            if state == 1 or state == -1:
-                row = (i // 3) * 3
-                col = (i % 3) * 3
-                center_x = (col + 1.5) * pix_square_size
-                center_y = (row + 1.5) * pix_square_size
-                
-                if state == 1: # Big Red X
-                    pygame.draw.line(canvas, (255, 0, 0), (center_x - 60, center_y - 60), (center_x + 60, center_y + 60), 10)
-                    pygame.draw.line(canvas, (255, 0, 0), (center_x - 60, center_y + 60), (center_x + 60, center_y - 60), 10)
-                elif state == -1: # Big Blue O
-                    pygame.draw.circle(canvas, (0, 0, 255), (int(center_x), int(center_y)), 70, 10)
+        for board_num, result in enumerate(self.board_results):
+            if result in (PLAYER_X, PLAYER_O):
+                self._draw_board_result(canvas, board_num, int(result), pix_square_size)
 
-        if self.window is not None:
-            self.window.blit(canvas, (0, 0))
-            pygame.event.pump()
-            pygame.display.update()
-            self.clock.tick(self.render_fps)
+        self.window.blit(canvas, (0, 0))
+        pygame.event.pump()
+        pygame.display.update()
+        self.clock.tick(self.render_fps)
 
-
-    # ================= Helper Functions =================  
     def close(self):
         if self.window is not None:
             pygame.display.quit()
             pygame.quit()
+            self.window = None
+            self.clock = None
 
-    def _get_legal_moves(self):
-        active_board_grid = self._get_grid_with_condition(0)
-        empty_squares = (self.grid == 0).astype(np.float32)
-        legal_moves_grid = active_board_grid * empty_squares # This is element wise mult, so 1's where it's empty and on active board
-        return legal_moves_grid
+    def legal_actions(self) -> np.ndarray:
+        return np.flatnonzero(self._get_legal_moves().ravel())
+
+    def _get_legal_moves(self) -> np.ndarray:
+        active_board_grid = self._boards_to_grid(self.active_boards.astype(np.float32))
+        empty_squares = (self.grid == EMPTY).astype(np.float32)
+        return active_board_grid * empty_squares
 
     def _get_info(self):
-        """
-        Give human readable info for debugging
-
-        Returns:
-            dict: dictionary containing human readable info about game state
-        """
         return {
             "board_states": self.mini_board_states.copy(),
-            "num_player_1_won_boards": np.sum(self.mini_board_states == 1),
-            "num_player_2_won_boards": np.sum(self.mini_board_states == -1),
-            "legal_moves": self._get_legal_moves()
-            }
-  
-    def _get_grid_with_condition(self, condition: int):
-        """
-        Returns the grid with 1's where condition is met, and 0's elsewhere.
-        
-        int: condition is a number representing a condition: 
-            0: currently playable
-            1: Won by player1
-            -1: Won by player2
-            2: unclaimed but currently unplayable
-            3: tied
-        """
-        mini_board_states_with_cond = (self.mini_board_states == condition).astype(np.float32)
-        boards_matrix = mini_board_states_with_cond.reshape(3, 3) # 3x3
-        return np.kron(boards_matrix, np.ones((3, 3), dtype=np.float32)) # 9x9
+            "board_results": self.board_results.copy(),
+            "active_boards": self.active_boards.copy(),
+            "winner": self.winner,
+            "num_player_1_won_boards": np.sum(self.board_results == PLAYER_X),
+            "num_player_2_won_boards": np.sum(self.board_results == PLAYER_O),
+            "legal_moves": self._get_legal_moves(),
+        }
 
-    def _check_3x3_state(self, board_slice):
-        """
-        Args:
-            board_slice: A 3x3 NumPy array (either a mini-board or the mega-board)
-        Returns:
-            int: 1 if X wins, -1 if O wins, 0 if no winner yet, 3 if tie
-        """
-        # Check rows and cols
-        for p in [1, -1]:
-            if np.any(np.all(board_slice == p, axis=0)) or np.any(np.all(board_slice == p, axis=1)):
-                return p
-        
-        # Check diagonals
-        if np.all(np.diag(board_slice) == 1) or np.all(np.diag(np.fliplr(board_slice)) == 1):
-            return 1
-        if np.all(np.diag(board_slice) == -1) or np.all(np.diag(np.fliplr(board_slice)) == -1):
-            return -1
-        
-        # Check for tie (no 0s for empty, no 2s for inactive-but-playable)
-        if not np.any(board_slice == 0) and not np.any(board_slice == 2):
-            return 3
-        
-        return 0
-    
+    def _get_grid_with_condition(self, condition: int) -> np.ndarray:
+        return self._boards_to_grid((self.mini_board_states == condition).astype(np.float32))
+
+    def _check_3x3_state(self, board_slice) -> int:
+        for player in (PLAYER_X, PLAYER_O):
+            if np.any(np.all(board_slice == player, axis=0)):
+                return player
+            if np.any(np.all(board_slice == player, axis=1)):
+                return player
+            if np.all(np.diag(board_slice) == player):
+                return player
+            if np.all(np.diag(np.fliplr(board_slice)) == player):
+                return player
+
+        if not np.any((board_slice == EMPTY) | (board_slice == INACTIVE)):
+            return DRAW
+
+        return EMPTY
+
     def _get_new_active_board(self, action_entry):
-        """
-        Given the last action entry, return the new active board number
-        If that board is unplayable, return all playable boards
-        """
-        row = action_entry[0] % 3
-        col = action_entry[1] % 3
-        board_num = (row * 3) + col
-        if self.mini_board_states[board_num] not in [1, -1, 3]:
-            return board_num
-        else:
-            return np.where(np.isin(self.mini_board_states, [0, 2]))[0]
-
-
+        row, col = action_entry
+        return np.flatnonzero(self._next_active_boards(row, col))
 
     def _int_to_entry(self, tile_num: int):
-        return np.array(divmod(tile_num, 9))
+        if not 0 <= int(tile_num) < 81:
+            raise IllegalMoveError(f"Action must be in [0, 80], got {tile_num}.")
+        return np.array(divmod(int(tile_num), 9), dtype=np.int8)
 
-    def _entry_to_int(self, x: int, y: int):
-        return (9 * y) + x
+    def _entry_to_int(self, row: int, col: int):
+        return (9 * int(row)) + int(col)
 
     def _board_num_to_3x3(self, board_num: int):
-        """
-        Return a 3x3 slice of the grid representing one board
+        row = (int(board_num) // 3) * 3
+        col = (int(board_num) % 3) * 3
+        return self.grid[row:row + 3, col:col + 3]
 
-        Args:
-            int: the board number, [0, 8] where 0 is top left, 2 is top right
+    def _action_entry_to_board_num(self, action_entry):
+        row, col = action_entry
+        return ((int(row) // 3) * 3) + (int(col) // 3)
 
-        Returns:
-            np array: 3x3 slice of the grid representing the mini board corresponding to input int
-        """
+    def _is_legal_entry(self, row: int, col: int) -> bool:
+        board_num = self._action_entry_to_board_num((row, col))
+        return (
+            self.grid[row, col] == EMPTY
+            and self.active_boards[board_num]
+            and self.board_results[board_num] == EMPTY
+        )
+
+    def _next_active_boards(self, row: int, col: int) -> np.ndarray:
+        target_board = (int(row) % 3) * 3 + (int(col) % 3)
+        available_boards = self.board_results == EMPTY
+
+        if available_boards[target_board]:
+            active_boards = np.zeros(9, dtype=bool)
+            active_boards[target_board] = True
+            return active_boards
+
+        return available_boards
+
+    def _boards_to_grid(self, board_values: np.ndarray) -> np.ndarray:
+        return np.repeat(np.repeat(board_values.reshape(3, 3), 3, axis=0), 3, axis=1)
+
+    def _draw_cell_mark(self, canvas, row: int, col: int, cell_size: float):
+        value = self.grid[row, col]
+        if value == PLAYER_X:
+            start_pos = (col * cell_size + 10, row * cell_size + 10)
+            end_pos = ((col + 1) * cell_size - 10, (row + 1) * cell_size - 10)
+            pygame.draw.line(canvas, (255, 0, 0), start_pos, end_pos, 3)
+            pygame.draw.line(canvas, (255, 0, 0), (start_pos[0], end_pos[1]), (end_pos[0], start_pos[1]), 3)
+        elif value == PLAYER_O:
+            center = (int((col + 0.5) * cell_size), int((row + 0.5) * cell_size))
+            pygame.draw.circle(canvas, (0, 0, 255), center, int(cell_size / 2 - 8), 3)
+
+    def _draw_board_result(self, canvas, board_num: int, result: int, cell_size: float):
         row = (board_num // 3) * 3
         col = (board_num % 3) * 3
+        center_x = (col + 1.5) * cell_size
+        center_y = (row + 1.5) * cell_size
 
-        return self.grid[row:row+3, col:col+3]
-        
-    def _action_entry_to_board_num(self, action_entry):
-        return ((action_entry[0] // 3) * 3) + (action_entry[1] // 3)
-
-   
-        
+        if result == PLAYER_X:
+            pygame.draw.line(canvas, (255, 0, 0), (center_x - 60, center_y - 60), (center_x + 60, center_y + 60), 10)
+            pygame.draw.line(canvas, (255, 0, 0), (center_x - 60, center_y + 60), (center_x + 60, center_y - 60), 10)
+        elif result == PLAYER_O:
+            pygame.draw.circle(canvas, (0, 0, 255), (int(center_x), int(center_y)), 70, 10)
